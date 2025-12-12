@@ -1,0 +1,255 @@
+package cmap
+
+import (
+	"hash/fnv"
+	"sync"
+
+	"github.com/marouanesouiri/stdx/internal/hash"
+)
+
+// ConcurrentMap is a thread-safe map with high performance through sharding.
+// It splits the keyspace across multiple shards, each with its own lock,
+// reducing lock contention in concurrent scenarios.
+type ConcurrentMap[K comparable, V any] struct {
+	shards    []*shard[K, V]
+	shardMask uint32
+}
+
+// shard represents a single map shard with its own lock.
+type shard[K comparable, V any] struct {
+	mu    sync.RWMutex
+	items map[K]V
+}
+
+// Item represents a key-value pair from the map.
+type Item[K comparable, V any] struct {
+	Key   K
+	Value V
+}
+
+// New creates a new ConcurrentMap with default shard count (32).
+// The shard count is optimized for typical concurrent workloads.
+func New[K comparable, V any]() ConcurrentMap[K, V] {
+	return WithShards[K, V](32)
+}
+
+// WithShards creates a new ConcurrentMap with the specified number of shards.
+// shardCount must be a power of 2 for optimal performance.
+// If not a power of 2, it will be rounded up to the next power of 2.
+func WithShards[K comparable, V any](shardCount int) ConcurrentMap[K, V] {
+	if shardCount <= 0 {
+		shardCount = 32
+	}
+
+	shardCount = nextPowerOf2(shardCount)
+
+	shards := make([]*shard[K, V], shardCount)
+	for i := range shardCount {
+		shards[i] = &shard[K, V]{
+			items: make(map[K]V),
+		}
+	}
+
+	return ConcurrentMap[K, V]{
+		shards:    shards,
+		shardMask: uint32(shardCount - 1),
+	}
+}
+
+// nextPowerOf2 returns the next power of 2 greater than or equal to n.
+func nextPowerOf2(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	n--
+	n |= n >> 1
+	n |= n >> 2
+	n |= n >> 4
+	n |= n >> 8
+	n |= n >> 16
+	n++
+	return n
+}
+
+// getShard returns the shard for the given key.
+func (m *ConcurrentMap[K, V]) getShard(key K) *shard[K, V] {
+	hash := hashKey(key)
+	index := hash & m.shardMask
+	return m.shards[index]
+}
+
+// hashKey computes a hash for the given key using FNV-1a.
+func hashKey[K comparable](key K) uint32 {
+	h := fnv.New32a()
+	h.Write(hash.KeyToBytes(key))
+	return h.Sum32()
+}
+
+// Set stores a key-value pair in the map.
+func (m *ConcurrentMap[K, V]) Set(key K, value V) {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	shard.items[key] = value
+	shard.mu.Unlock()
+}
+
+// Get retrieves a value from the map.
+// Returns the value and true if the key exists, otherwise returns zero value and false.
+func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
+	shard := m.getShard(key)
+	shard.mu.RLock()
+	val, ok := shard.items[key]
+	shard.mu.RUnlock()
+	return val, ok
+}
+
+// Delete removes a key from the map.
+func (m *ConcurrentMap[K, V]) Delete(key K) {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	delete(shard.items, key)
+	shard.mu.Unlock()
+}
+
+// Has checks if a key exists in the map.
+func (m *ConcurrentMap[K, V]) Has(key K) bool {
+	_, ok := m.Get(key)
+	return ok
+}
+
+// GetOrSet atomically gets a value or sets it if absent.
+// Returns the value and true if it existed, or the newly set value and false.
+func (m *ConcurrentMap[K, V]) GetOrSet(key K, value V) (V, bool) {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if existingVal, ok := shard.items[key]; ok {
+		return existingVal, true
+	}
+	shard.items[key] = value
+	return value, false
+}
+
+// SetIfAbsent sets the value only if the key doesn't exist.
+// Returns true if the value was set, false if the key already existed.
+func (m *ConcurrentMap[K, V]) SetIfAbsent(key K, value V) bool {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	if _, ok := shard.items[key]; ok {
+		return false
+	}
+	shard.items[key] = value
+	return true
+}
+
+// Remove atomically removes and returns a value.
+// Returns the value and true if it existed, otherwise returns zero value and false.
+func (m *ConcurrentMap[K, V]) Remove(key K) (V, bool) {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	val, ok := shard.items[key]
+	if ok {
+		delete(shard.items, key)
+	}
+	return val, ok
+}
+
+// Compute atomically computes a new value for a key.
+// The function receives the current value (if present) and a boolean indicating presence.
+// The returned value is stored in the map.
+func (m *ConcurrentMap[K, V]) Compute(key K, fn func(oldValue V, exists bool) V) V {
+	shard := m.getShard(key)
+	shard.mu.Lock()
+	defer shard.mu.Unlock()
+
+	oldValue, exists := shard.items[key]
+	newValue := fn(oldValue, exists)
+	shard.items[key] = newValue
+	return newValue
+}
+
+// Len returns the total number of items in the map.
+func (m *ConcurrentMap[K, V]) Len() int {
+	count := 0
+	for _, shard := range m.shards {
+		shard.mu.RLock()
+		count += len(shard.items)
+		shard.mu.RUnlock()
+	}
+	return count
+}
+
+// Clear removes all items from the map.
+func (m *ConcurrentMap[K, V]) Clear() {
+	for _, shard := range m.shards {
+		shard.mu.Lock()
+		shard.items = make(map[K]V)
+		shard.mu.Unlock()
+	}
+}
+
+// Range calls the function for each key-value pair in the map.
+// If the function returns false, iteration stops.
+// Note: The function is called while holding a read lock on each shard.
+func (m *ConcurrentMap[K, V]) Range(fn func(key K, value V) bool) {
+	for _, shard := range m.shards {
+		shard.mu.RLock()
+		for k, v := range shard.items {
+			if !fn(k, v) {
+				shard.mu.RUnlock()
+				return
+			}
+		}
+		shard.mu.RUnlock()
+	}
+}
+
+// Keys returns a slice of all keys in the map.
+// This creates a snapshot at the time of the call.
+func (m *ConcurrentMap[K, V]) Keys() []K {
+	keys := make([]K, 0, m.Len())
+	m.Range(func(key K, _ V) bool {
+		keys = append(keys, key)
+		return true
+	})
+	return keys
+}
+
+// Values returns a slice of all values in the map.
+// This creates a snapshot at the time of the call.
+func (m *ConcurrentMap[K, V]) Values() []V {
+	values := make([]V, 0, m.Len())
+	m.Range(func(_ K, value V) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
+// Items returns a slice of all key-value pairs in the map.
+// This creates a snapshot at the time of the call.
+func (m *ConcurrentMap[K, V]) Items() []Item[K, V] {
+	items := make([]Item[K, V], 0, m.Len())
+	m.Range(func(key K, value V) bool {
+		items = append(items, Item[K, V]{Key: key, Value: value})
+		return true
+	})
+	return items
+}
+
+// Clone creates a deep copy of the ConcurrentMap with independent shards.
+// Modifications to the clone will not affect the original map and vice versa.
+// This operation locks all shards temporarily to ensure a consistent snapshot.
+func (m *ConcurrentMap[K, V]) Clone() ConcurrentMap[K, V] {
+	clone := WithShards[K, V](len(m.shards))
+	m.Range(func(key K, value V) bool {
+		clone.Set(key, value)
+		return true
+	})
+	return clone
+}
