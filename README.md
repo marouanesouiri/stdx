@@ -24,6 +24,7 @@
 ### Helpers
 - **`scheduler`**: Runs tasks after a set delay using a single background worker.
 - **`collectors`**: Helpers to convert Streams back into lists, maps, or sets.
+- **`log`**: A simple, fast logger that supports JSON and text output.
 
 ## 🚀 Installation
 
