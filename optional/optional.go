@@ -48,6 +48,15 @@ func FromZero[T comparable](value T) Option[T] {
 	return Some(value)
 }
 
+// FromPair creates an Option from a (value, ok) pair.
+// If ok is false, it returns None, otherwise Some(value).
+func FromPair[T any](value T, ok bool) Option[T] {
+	if !ok {
+		return None[T]()
+	}
+	return Some(value)
+}
+
 // IsPresent returns true if the value is present.
 func (o Option[T]) IsPresent() bool {
 	return o.isPresent
