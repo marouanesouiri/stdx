@@ -25,4 +25,4 @@ Control details:
 
 	logger.SetLevel(log.LogLevelDebugLevel)
 */
-package log
+package xlog
