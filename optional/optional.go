@@ -4,30 +4,49 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"reflect"
+	"fmt"
+)
+
+type state int8
+
+const (
+	stateAbsent state = iota
+	statePresent
+	stateNil
 )
 
 // Option is a container for an optional value of type T.
 // It provides a type-safe way to represent values that may or may not be present,
 // avoiding the need for nil pointers or special "zero" sentinel values.
+//
+// IMPORTANT:
+//  - When using Option in a struct that will be marshaled to JSON,
+//    always use the `json:",omitzero"` (Go 1.24+) tag.
+//    This allows the Option to internally decide whether to omit the field (None), 
+//    set it to "null" (Nil), or set it to the real value (Some).
 type Option[T any] struct {
-	isPresent bool
-	value     T
+	state state
+	value T
 }
 
 // Some creates an Option with a present value.
 func Some[T any](value T) Option[T] {
 	return Option[T]{
-		isPresent: true,
-		value:     value,
+		state: statePresent,
+		value: value,
 	}
 }
 
 // None creates an Option with an absent value.
 func None[T any]() Option[T] {
-	return Option[T]{
-		isPresent: false,
-	}
+	return Option[T]{state: stateAbsent}
+}
+
+// Nil creates an Option representing an explicit "null" value.
+// It behaves like None (IsPresent() == false), but when marshaled to JSON, 
+// it renders as 'null' instead of being omitted.
+func Nil[T any]() Option[T] {
+	return Option[T]{state: stateNil}
 }
 
 // FromPtr creates an Option from a pointer.
@@ -59,12 +78,12 @@ func FromPair[T any](value T, ok bool) Option[T] {
 
 // IsPresent returns true if the value is present.
 func (o Option[T]) IsPresent() bool {
-	return o.isPresent
+	return o.state == statePresent
 }
 
 // IsAbsent returns true if the value is absent.
 func (o Option[T]) IsAbsent() bool {
-	return !o.isPresent
+	return o.state != stateAbsent
 }
 
 // Get returns the value. Note that this returns the value even if absent.
@@ -75,7 +94,7 @@ func (o Option[T]) Get() T {
 
 // MustGet returns the value or panics if absent.
 func (o Option[T]) MustGet() T {
-	if !o.isPresent {
+	if o.state != statePresent {
 		panic("no element to get from option")
 	}
 	return o.value
@@ -83,8 +102,11 @@ func (o Option[T]) MustGet() T {
 
 // GetErr returns the value and an error if absent.
 func (o Option[T]) GetErr() (T, error) {
-	if !o.isPresent {
-		var zero T
+	var zero T
+	if o.state == stateNil {
+		return zero, errors.New("value is nil")
+	}
+	if o.state == stateAbsent {
 		return zero, errors.New("value is absent")
 	}
 	return o.value, nil
@@ -92,7 +114,7 @@ func (o Option[T]) GetErr() (T, error) {
 
 // OrElse returns the value if present, otherwise returns fallback.
 func (o Option[T]) OrElse(fallback T) T {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return fallback
 	}
 	return o.value
@@ -100,7 +122,7 @@ func (o Option[T]) OrElse(fallback T) T {
 
 // OrElseGet returns the value if present, otherwise returns the value given by the supplier.
 func (o Option[T]) OrElseGet(supplier func() T) T {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return supplier()
 	}
 	return o.value
@@ -108,7 +130,7 @@ func (o Option[T]) OrElseGet(supplier func() T) T {
 
 // OrElseErr returns the value if present, otherwise returns the error given by the supplier.
 func (o Option[T]) OrElseErr(supplier func() error) (T, error) {
-	if !o.isPresent {
+	if o.state != statePresent {
 		var zero T
 		return zero, supplier()
 	}
@@ -117,8 +139,8 @@ func (o Option[T]) OrElseErr(supplier func() error) (T, error) {
 
 // OrEmpty returns the value if present, otherwise returns the zero value of T.
 func (o Option[T]) OrEmpty() T {
-	var empty T
-	if !o.isPresent {
+	if o.state != statePresent {
+		var empty T
 		return empty
 	}
 	return o.value
@@ -126,7 +148,7 @@ func (o Option[T]) OrEmpty() T {
 
 // OrPanic returns the value if present, otherwise panics with the given message.
 func (o Option[T]) OrPanic(message string) T {
-	if !o.isPresent {
+	if o.state != statePresent {
 		panic(message)
 	}
 	return o.value
@@ -134,7 +156,7 @@ func (o Option[T]) OrPanic(message string) T {
 
 // Ptr returns a pointer to the value if present, otherwise nil.
 func (o Option[T]) Ptr() *T {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return nil
 	}
 	return &o.value
@@ -142,19 +164,12 @@ func (o Option[T]) Ptr() *T {
 
 // IsZero returns true if the option value is the zero value.
 func (o Option[T]) IsZero() bool {
-	if !o.isPresent {
-		return true
-	}
-	var v any = o.value
-	if v, ok := v.(interface{ IsZero() bool }); ok {
-		return v.IsZero()
-	}
-	return reflect.ValueOf(o.value).IsZero()
+	return o.state == stateAbsent
 }
 
 // IfPresent executes the given function if the value is present.
 func (o Option[T]) IfPresent(fn func(T)) {
-	if o.isPresent {
+	if o.state == statePresent {
 		fn(o.value)
 	}
 }
@@ -162,7 +177,7 @@ func (o Option[T]) IfPresent(fn func(T)) {
 // IfPresentOrElse executes the first function if the value is present,
 // otherwise executes the second function.
 func (o Option[T]) IfPresentOrElse(ifPresent func(T), orElse func()) {
-	if o.isPresent {
+	if o.state == statePresent {
 		ifPresent(o.value)
 	} else {
 		orElse()
@@ -172,7 +187,7 @@ func (o Option[T]) IfPresentOrElse(ifPresent func(T), orElse func()) {
 // Filter returns the Option if it is present and the predicate returns true,
 // otherwise returns None.
 func (o Option[T]) Filter(predicate func(T) bool) Option[T] {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return o
 	}
 	if predicate(o.value) {
@@ -184,7 +199,7 @@ func (o Option[T]) Filter(predicate func(T) bool) Option[T] {
 // Map transforms the value inside the Option using the provided function.
 // If the Option is None, returns None.
 func Map[T, U any](o Option[T], mapper func(T) U) Option[U] {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return None[U]()
 	}
 	return Some(mapper(o.value))
@@ -193,7 +208,7 @@ func Map[T, U any](o Option[T], mapper func(T) U) Option[U] {
 // FlatMap transforms the value inside the Option using the provided function
 // that returns an Option. If the Option is None, returns None.
 func FlatMap[T, U any](o Option[T], mapper func(T) Option[U]) Option[U] {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return None[U]()
 	}
 	return mapper(o.value)
@@ -201,7 +216,7 @@ func FlatMap[T, U any](o Option[T], mapper func(T) Option[U]) Option[U] {
 
 // And returns None if the Option is None, otherwise returns other.
 func (o Option[T]) And(other Option[T]) Option[T] {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return None[T]()
 	}
 	return other
@@ -209,7 +224,7 @@ func (o Option[T]) And(other Option[T]) Option[T] {
 
 // Or returns the Option if it contains a value, otherwise returns other.
 func (o Option[T]) Or(other Option[T]) Option[T] {
-	if o.isPresent {
+	if o.state != statePresent {
 		return o
 	}
 	return other
@@ -218,7 +233,7 @@ func (o Option[T]) Or(other Option[T]) Option[T] {
 // OrElseOption returns the Option if it contains a value,
 // otherwise returns the Option provided by the supplier.
 func (o Option[T]) OrElseOption(supplier func() Option[T]) Option[T] {
-	if o.isPresent {
+	if o.state != statePresent {
 		return o
 	}
 	return supplier()
@@ -226,10 +241,10 @@ func (o Option[T]) OrElseOption(supplier func() Option[T]) Option[T] {
 
 // Xor returns Some if exactly one of the two Options is Some, otherwise None.
 func (o Option[T]) Xor(other Option[T]) Option[T] {
-	if o.isPresent && !other.isPresent {
+	if o.state == statePresent && other.state != statePresent {
 		return o
 	}
-	if !o.isPresent && other.isPresent {
+	if o.state != statePresent && other.state == statePresent {
 		return other
 	}
 	return None[T]()
@@ -237,11 +252,8 @@ func (o Option[T]) Xor(other Option[T]) Option[T] {
 
 // Equal compares two Options using the provided equality function.
 func (o Option[T]) Equal(other Option[T], eq func(T, T) bool) bool {
-	if o.isPresent != other.isPresent {
+	if o.state != other.state {
 		return false
-	}
-	if !o.isPresent {
-		return true
 	}
 	return eq(o.value, other.value)
 }
@@ -250,10 +262,10 @@ func (o Option[T]) Equal(other Option[T], eq func(T, T) bool) bool {
 // Present values are marshaled as their JSON representation.
 // Absent values are marshaled as null.
 func (o Option[T]) MarshalJSON() ([]byte, error) {
-	if o.isPresent {
+	if o.state == statePresent {
 		return json.Marshal(o.value)
 	}
-	return json.Marshal(nil)
+	return []byte("null"), nil
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
@@ -261,7 +273,7 @@ func (o Option[T]) MarshalJSON() ([]byte, error) {
 // All other values are unmarshaled as Some.
 func (o *Option[T]) UnmarshalJSON(data []byte) error {
 	if string(bytes.ToLower(data)) == "null" {
-		o.isPresent = false
+		o.state = stateNil
 		return nil
 	}
 
@@ -269,22 +281,26 @@ func (o *Option[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	o.isPresent = true
+	o.state = statePresent
 	return nil
 }
 
 // String returns a string representation of the Option.
 func (o Option[T]) String() string {
-	if !o.isPresent {
+	switch o.state {
+	case stateAbsent:
 		return "None"
+	case stateNil:
+		return "Nil"
+	default:
+		return fmt.Sprintf("Some(%v)", o.value)
 	}
-	return "Some(" + any(o.value).(interface{ String() string }).String() + ")"
 }
 
 // TryMap applies the mapper function and returns Some(result) if no error occurs,
 // otherwise returns None.
 func TryMap[T, U any](o Option[T], mapper func(T) (U, error)) Option[U] {
-	if !o.isPresent {
+	if o.state != statePresent {
 		return None[U]()
 	}
 	result, err := mapper(o.value)
