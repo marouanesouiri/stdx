@@ -163,3 +163,50 @@ func (r Result[T]) Recover(fn func(error) T) T {
 	}
 	return r.value
 }
+
+// Void is a Result that contains no value.
+// It is used for operations that can fail but don't return data on success.
+type Void struct {
+	err error
+}
+
+// OkVoid creates a successful Result with no value.
+func OkVoid() Void {
+	return Void{err: nil}
+}
+
+// ErrVoid creates a failed Result with no value.
+func ErrVoid(err error) Void {
+	return Void{err: err}
+}
+
+// IsOk returns true if the Result is successful.
+func (v Void) IsOk() bool {
+	return v.err == nil
+}
+
+// IsErr returns true if the Result is a failure.
+func (v Void) IsErr() bool {
+	return v.err != nil
+}
+
+// Err creates a failed Result containing an error.
+func (v Void) Err() error {
+	return v.err
+}
+
+// ToResult converts a Void into a Result[struct{}].
+func (v Void) ToResult() Result[struct{}] {
+	if v.err != nil {
+		return Err[struct{}](v.err)
+	}
+	return Ok(struct{}{})
+}
+
+// String returns a string representation of the Result.
+func (v Void) String() string {
+	if v.err != nil {
+		return fmt.Sprintf("Err(%v)", v.err)
+	}
+	return fmt.Sprintf("Ok")
+}
