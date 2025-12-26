@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/marouanesouiri/stdx/internal/hash"
+	"github.com/marouanesouiri/stdx/optional"
 )
 
 // ConcurrentMap is a thread-safe map with high performance through sharding.
@@ -94,13 +95,13 @@ func (m *ConcurrentMap[K, V]) Set(key K, value V) {
 }
 
 // Get retrieves a value from the map.
-// Returns the value and true if the key exists, otherwise returns zero value and false.
-func (m *ConcurrentMap[K, V]) Get(key K) (V, bool) {
+// Returns an Option containing the value if the key exists, otherwise returns None.
+func (m *ConcurrentMap[K, V]) Get(key K) optional.Option[V] {
 	shard := m.getShard(key)
 	shard.mu.RLock()
 	val, ok := shard.items[key]
 	shard.mu.RUnlock()
-	return val, ok
+	return optional.FromPair(val, ok)
 }
 
 // Delete removes a key from the map.
@@ -113,8 +114,7 @@ func (m *ConcurrentMap[K, V]) Delete(key K) {
 
 // Has checks if a key exists in the map.
 func (m *ConcurrentMap[K, V]) Has(key K) bool {
-	_, ok := m.Get(key)
-	return ok
+	return m.Get(key).IsPresent()
 }
 
 // GetOrSet atomically gets a value or sets it if absent.
@@ -146,8 +146,8 @@ func (m *ConcurrentMap[K, V]) SetIfAbsent(key K, value V) bool {
 }
 
 // Remove atomically removes and returns a value.
-// Returns the value and true if it existed, otherwise returns zero value and false.
-func (m *ConcurrentMap[K, V]) Remove(key K) (V, bool) {
+// Returns an Option containing the value if it existed, otherwise returns None.
+func (m *ConcurrentMap[K, V]) Remove(key K) optional.Option[V] {
 	shard := m.getShard(key)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
@@ -156,19 +156,19 @@ func (m *ConcurrentMap[K, V]) Remove(key K) (V, bool) {
 	if ok {
 		delete(shard.items, key)
 	}
-	return val, ok
+	return optional.FromPair(val, ok)
 }
 
 // Compute atomically computes a new value for a key.
-// The function receives the current value (if present) and a boolean indicating presence.
+// The function receives the current value as an Option.
 // The returned value is stored in the map.
-func (m *ConcurrentMap[K, V]) Compute(key K, fn func(oldValue V, exists bool) V) V {
+func (m *ConcurrentMap[K, V]) Compute(key K, fn func(oldValue optional.Option[V]) V) V {
 	shard := m.getShard(key)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
 
 	oldValue, exists := shard.items[key]
-	newValue := fn(oldValue, exists)
+	newValue := fn(optional.FromPair(oldValue, exists))
 	shard.items[key] = newValue
 	return newValue
 }

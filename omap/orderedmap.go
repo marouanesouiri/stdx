@@ -1,5 +1,7 @@
 package omap
 
+import "github.com/marouanesouiri/stdx/optional"
+
 // OrderedMap is a map that maintains insertion order of keys.
 // It combines a hash map for O(1) lookups with a doubly-linked list for order preservation.
 type OrderedMap[K comparable, V any] struct {
@@ -49,13 +51,10 @@ func (m *OrderedMap[K, V]) Set(key K, value V) {
 }
 
 // Get retrieves the value for a key.
-// Returns the value and true if found, zero value and false otherwise.
-func (m *OrderedMap[K, V]) Get(key K) (V, bool) {
-	if e, exists := m.items[key]; exists {
-		return e.value, true
-	}
-	var zero V
-	return zero, false
+// Returns an Option containing the value if found, None otherwise.
+func (m *OrderedMap[K, V]) Get(key K) optional.Option[V] {
+	e, exists := m.items[key]
+	return optional.FromPair(e.value, exists)
 }
 
 // Delete removes a key-value pair from the map.
@@ -129,57 +128,49 @@ func (m *OrderedMap[K, V]) Range(fn func(K, V) bool) {
 }
 
 // First returns the first inserted key-value pair.
-// Returns the key, value, and true if the map is not empty, zero values and false otherwise.
-func (m *OrderedMap[K, V]) First() (K, V, bool) {
+// Returns an Option containing the item if the map is not empty, None otherwise.
+func (m *OrderedMap[K, V]) First() optional.Option[Item[K, V]] {
 	if m.head == nil {
-		var zeroK K
-		var zeroV V
-		return zeroK, zeroV, false
+		return optional.None[Item[K, V]]()
 	}
-	return m.head.key, m.head.value, true
+	return optional.Some(Item[K, V]{Key: m.head.key, Value: m.head.value})
 }
 
 // Last returns the most recently inserted key-value pair.
-// Returns the key, value, and true if the map is not empty, zero values and false otherwise.
-func (m *OrderedMap[K, V]) Last() (K, V, bool) {
+// Returns an Option containing the item if the map is not empty, None otherwise.
+func (m *OrderedMap[K, V]) Last() optional.Option[Item[K, V]] {
 	if m.tail == nil {
-		var zeroK K
-		var zeroV V
-		return zeroK, zeroV, false
+		return optional.None[Item[K, V]]()
 	}
-	return m.tail.key, m.tail.value, true
+	return optional.Some(Item[K, V]{Key: m.tail.key, Value: m.tail.value})
 }
 
 // PopFirst removes and returns the first inserted key-value pair.
-// Returns the key, value, and true if the map was not empty, zero values and false otherwise.
-func (m *OrderedMap[K, V]) PopFirst() (K, V, bool) {
+// Returns an Option containing the item if the map was not empty, None otherwise.
+func (m *OrderedMap[K, V]) PopFirst() optional.Option[Item[K, V]] {
 	if m.head == nil {
-		var zeroK K
-		var zeroV V
-		return zeroK, zeroV, false
+		return optional.None[Item[K, V]]()
 	}
 
 	e := m.head
 	delete(m.items, e.key)
 	m.removeEntry(e)
 	m.len--
-	return e.key, e.value, true
+	return optional.Some(Item[K, V]{Key: e.key, Value: e.value})
 }
 
 // PopLast removes and returns the most recently inserted key-value pair.
-// Returns the key, value, and true if the map was not empty, zero values and false otherwise.
-func (m *OrderedMap[K, V]) PopLast() (K, V, bool) {
+// Returns an Option containing the item if the map was not empty, None otherwise.
+func (m *OrderedMap[K, V]) PopLast() optional.Option[Item[K, V]] {
 	if m.tail == nil {
-		var zeroK K
-		var zeroV V
-		return zeroK, zeroV, false
+		return optional.None[Item[K, V]]()
 	}
 
 	e := m.tail
 	delete(m.items, e.key)
 	m.removeEntry(e)
 	m.len--
-	return e.key, e.value, true
+	return optional.Some(Item[K, V]{Key: e.key, Value: e.value})
 }
 
 // Clone creates a deep copy of the OrderedMap with independent internal structures.

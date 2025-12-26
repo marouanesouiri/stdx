@@ -13,8 +13,8 @@ func TestOrderedMapBasic(t *testing.T) {
 		t.Errorf("Expected len 3, got %d", m.Len())
 	}
 
-	if val, ok := m.Get("b"); !ok || val != 2 {
-		t.Errorf("Expected b=2, got %v, %v", val, ok)
+	if opt := m.Get("b"); !opt.IsPresent() || opt.MustGet() != 2 {
+		t.Errorf("Expected b=2, got %v", opt)
 	}
 
 	if !m.Has("a") {
@@ -54,8 +54,8 @@ func TestOrderedMapUpdateMovesToEnd(t *testing.T) {
 		}
 	}
 
-	if val, _ := m.Get("a"); val != 10 {
-		t.Errorf("Expected a=10, got %d", val)
+	if opt := m.Get("a"); opt.MustGet() != 10 {
+		t.Errorf("Expected a=10, got %v", opt.Get())
 	}
 }
 
@@ -65,14 +65,14 @@ func TestOrderedMapFirstLast(t *testing.T) {
 	m.Set("middle", 2)
 	m.Set("last", 3)
 
-	k, v, ok := m.First()
-	if !ok || k != "first" || v != 1 {
-		t.Errorf("Expected first=1, got %s=%d, %v", k, v, ok)
+	optFirst := m.First()
+	if !optFirst.IsPresent() || optFirst.MustGet().Key != "first" || optFirst.MustGet().Value != 1 {
+		t.Errorf("Expected first=1, got %v", optFirst)
 	}
 
-	k, v, ok = m.Last()
-	if !ok || k != "last" || v != 3 {
-		t.Errorf("Expected last=3, got %s=%d, %v", k, v, ok)
+	optLast := m.Last()
+	if !optLast.IsPresent() || optLast.MustGet().Key != "last" || optLast.MustGet().Value != 3 {
+		t.Errorf("Expected last=3, got %v", optLast)
 	}
 }
 
@@ -82,14 +82,14 @@ func TestOrderedMapPopFirstLast(t *testing.T) {
 	m.Set("b", 2)
 	m.Set("c", 3)
 
-	k, v, ok := m.PopFirst()
-	if !ok || k != "a" || v != 1 {
-		t.Errorf("PopFirst failed: %s=%d, %v", k, v, ok)
+	optFirst := m.PopFirst()
+	if !optFirst.IsPresent() || optFirst.MustGet().Key != "a" || optFirst.MustGet().Value != 1 {
+		t.Errorf("PopFirst failed: %v", optFirst)
 	}
 
-	k, v, ok = m.PopLast()
-	if !ok || k != "c" || v != 3 {
-		t.Errorf("PopLast failed: %s=%d, %v", k, v, ok)
+	optLast := m.PopLast()
+	if !optLast.IsPresent() || optLast.MustGet().Key != "c" || optLast.MustGet().Value != 3 {
+		t.Errorf("PopLast failed: %v", optLast)
 	}
 
 	if m.Len() != 1 {

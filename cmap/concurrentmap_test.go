@@ -3,6 +3,8 @@ package cmap
 import (
 	"sync"
 	"testing"
+
+	"github.com/marouanesouiri/stdx/optional"
 )
 
 // TestConcurrentMapBasic tests basic operations
@@ -11,8 +13,8 @@ func TestConcurrentMapBasic(t *testing.T) {
 
 	// Test Set and Get
 	m.Set("key1", 100)
-	if val, ok := m.Get("key1"); !ok || val != 100 {
-		t.Errorf("Expected 100, got %d", val)
+	if opt := m.Get("key1"); !opt.IsPresent() || opt.MustGet() != 100 {
+		t.Errorf("Expected 100, got %v", opt)
 	}
 
 	// Test Has
@@ -93,20 +95,20 @@ func TestConcurrentMapAtomic(t *testing.T) {
 
 	// Test Remove
 	m.Set("temp", 99)
-	if val, ok := m.Remove("temp"); !ok || val != 99 {
+	if opt := m.Remove("temp"); !opt.IsPresent() || opt.MustGet() != 99 {
 		t.Error("Expected Remove to return value")
 	}
-	if _, ok := m.Remove("temp"); ok {
+	if opt := m.Remove("temp"); opt.IsPresent() {
 		t.Error("Expected Remove to fail on missing key")
 	}
 
 	// Test Compute
 	m.Set("compute", 5)
-	newVal := m.Compute("compute", func(old int, exists bool) int {
-		if !exists {
+	newVal := m.Compute("compute", func(old optional.Option[int]) int {
+		if !old.IsPresent() {
 			return 1
 		}
-		return old * 2
+		return old.MustGet() * 2
 	})
 	if newVal != 10 {
 		t.Errorf("Expected 10, got %d", newVal)
