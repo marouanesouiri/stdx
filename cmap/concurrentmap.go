@@ -1,12 +1,15 @@
 package cmap
 
 import (
-	"hash/fnv"
+	"hash/maphash"
 	"sync"
 
-	"github.com/marouanesouiri/stdx/internal/hash"
+	"github.com/marouanesouiri/stdx/hash"
 	"github.com/marouanesouiri/stdx/optional"
 )
+
+// SHARD_COUNT is the default shard count.
+const SHARD_COUNT = 32
 
 // ConcurrentMap is a thread-safe map with high performance through sharding.
 // It splits the keyspace across multiple shards, each with its own lock,
@@ -14,6 +17,8 @@ import (
 type ConcurrentMap[K comparable, V any] struct {
 	shards    []*shard[K, V]
 	shardMask uint32
+	hashFunc  hash.Hasher[K]
+	seed      maphash.Seed
 }
 
 // shard represents a single map shard with its own lock.
@@ -28,18 +33,38 @@ type Item[K comparable, V any] struct {
 	Value V
 }
 
-// New creates a new ConcurrentMap with default shard count (32).
+// Option defines a functional option for ConcurrentMap configuration.
+type Option[K comparable, V any] func(ConcurrentMap[K, V]) ConcurrentMap[K, V]
+
+// WithHash sets a custom hash function for key sharding.
+// The hash function should be fast and provide a good distribution.
+func WithHash[K comparable, V any](f hash.Hasher[K]) Option[K, V] {
+	return func(m ConcurrentMap[K, V]) ConcurrentMap[K, V] {
+		m.hashFunc = f
+		return m
+	}
+}
+
+// WithSeed sets a specific seed for the hash function.
+func WithSeed[K comparable, V any](seed maphash.Seed) Option[K, V] {
+	return func(m ConcurrentMap[K, V]) ConcurrentMap[K, V] {
+		m.seed = seed
+		return m
+	}
+}
+
+// New creates a new ConcurrentMap with default shard count (SHARD_COUNT).
 // The shard count is optimized for typical concurrent workloads.
-func New[K comparable, V any]() ConcurrentMap[K, V] {
-	return WithShards[K, V](32)
+func New[K comparable, V any](opts ...Option[K, V]) ConcurrentMap[K, V] {
+	return WithShards(SHARD_COUNT, opts...)
 }
 
 // WithShards creates a new ConcurrentMap with the specified number of shards.
 // shardCount must be a power of 2 for optimal performance.
 // If not a power of 2, it will be rounded up to the next power of 2.
-func WithShards[K comparable, V any](shardCount int) ConcurrentMap[K, V] {
+func WithShards[K comparable, V any](shardCount int, opts ...Option[K, V]) ConcurrentMap[K, V] {
 	if shardCount <= 0 {
-		shardCount = 32
+		shardCount = SHARD_COUNT
 	}
 
 	shardCount = nextPowerOf2(shardCount)
@@ -51,10 +76,18 @@ func WithShards[K comparable, V any](shardCount int) ConcurrentMap[K, V] {
 		}
 	}
 
-	return ConcurrentMap[K, V]{
+	m := ConcurrentMap[K, V]{
 		shards:    shards,
 		shardMask: uint32(shardCount - 1),
+		hashFunc:  hash.GetHashFunc[K](),
+		seed:      maphash.MakeSeed(),
 	}
+
+	for _, opt := range opts {
+		m = opt(m)
+	}
+
+	return m
 }
 
 // nextPowerOf2 returns the next power of 2 greater than or equal to n.
@@ -74,16 +107,9 @@ func nextPowerOf2(n int) int {
 
 // getShard returns the shard for the given key.
 func (m *ConcurrentMap[K, V]) getShard(key K) *shard[K, V] {
-	hash := hashKey(key)
-	index := hash & m.shardMask
+	hashVal := m.hashFunc(m.seed, key)
+	index := hashVal & m.shardMask
 	return m.shards[index]
-}
-
-// hashKey computes a hash for the given key using FNV-1a.
-func hashKey[K comparable](key K) uint32 {
-	h := fnv.New32a()
-	h.Write(hash.KeyToBytes(key))
-	return h.Sum32()
 }
 
 // Set stores a key-value pair in the map.
@@ -246,7 +272,7 @@ func (m *ConcurrentMap[K, V]) Items() []Item[K, V] {
 // Modifications to the clone will not affect the original map and vice versa.
 // This operation locks all shards temporarily to ensure a consistent snapshot.
 func (m *ConcurrentMap[K, V]) Clone() ConcurrentMap[K, V] {
-	clone := WithShards[K, V](len(m.shards))
+	clone := WithShards(len(m.shards), WithHash[K, V](m.hashFunc), WithSeed[K, V](m.seed))
 	m.Range(func(key K, value V) bool {
 		clone.Set(key, value)
 		return true
