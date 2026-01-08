@@ -1,5 +1,10 @@
 package mmap
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Multimap is a map that allows multiple values per key.
 // It prevents duplicate values for the same key.
 type Multimap[K comparable, V comparable] struct {
@@ -203,4 +208,29 @@ func (m *Multimap[K, V]) ForEachKey(fn func(K, []V) bool) {
 			return
 		}
 	}
+}
+
+// String returns a string representation of the Multimap.
+func (m *Multimap[K, V]) String() string {
+	var sb strings.Builder
+	sb.WriteString("Multimap{")
+	first := true
+	for k, set := range m.items {
+		if !first {
+			sb.WriteString(", ")
+		}
+		first = false
+		fmt.Fprintf(&sb, "%v:[", k)
+		firstVal := true
+		for v := range set {
+			if !firstVal {
+				sb.WriteString(" ")
+			}
+			firstVal = false
+			fmt.Fprintf(&sb, "%v", v)
+		}
+		sb.WriteString("]")
+	}
+	sb.WriteString("}")
+	return sb.String()
 }

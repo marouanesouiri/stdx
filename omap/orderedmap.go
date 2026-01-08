@@ -1,6 +1,11 @@
 package omap
 
-import "github.com/marouanesouiri/stdx/optional"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/marouanesouiri/stdx/optional"
+)
 
 // OrderedMap is a map that maintains insertion order of keys.
 // It combines a hash map for O(1) lookups with a doubly-linked list for order preservation.
@@ -225,4 +230,20 @@ func (m *OrderedMap[K, V]) removeEntry(e *entry[K, V]) {
 
 	e.prev = nil
 	e.next = nil
+}
+
+// String returns a string representation of the OrderedMap.
+func (m *OrderedMap[K, V]) String() string {
+	var sb strings.Builder
+	sb.WriteString("OrderedMap{")
+	first := true
+	for e := m.head; e != nil; e = e.next {
+		if !first {
+			sb.WriteString(", ")
+		}
+		first = false
+		fmt.Fprintf(&sb, "%v:%v", e.key, e.value)
+	}
+	sb.WriteString("}")
+	return sb.String()
 }

@@ -1,6 +1,7 @@
 package cmap
 
 import (
+	"fmt"
 	"hash/maphash"
 	"sync"
 
@@ -278,4 +279,9 @@ func (m *ConcurrentMap[K, V]) Clone() ConcurrentMap[K, V] {
 		return true
 	})
 	return clone
+}
+
+// String returns a string representation of this cmap.
+func (m *ConcurrentMap[K, V]) String() string {
+	return fmt.Sprintf("ConcurrentMap{len=%d, shards=%d}", m.Len(), len(m.shards))
 }

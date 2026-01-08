@@ -1,6 +1,10 @@
 package set
 
-import "iter"
+import (
+	"fmt"
+	"iter"
+	"strings"
+)
 
 // Set is a collection of unique comparable elements.
 // It is safe to copy Set values as the underlying map is a reference type.
@@ -207,4 +211,20 @@ func (s Set[T]) Seq() iter.Seq[T] {
 			}
 		}
 	}
+}
+
+// String returns a string representation of the Set.
+func (s *Set[T]) String() string {
+	var sb strings.Builder
+	sb.WriteString("Set{")
+	first := true
+	for item := range s.items {
+		if !first {
+			sb.WriteString(", ")
+		}
+		first = false
+		fmt.Fprintf(&sb, "%v", item)
+	}
+	sb.WriteString("}")
+	return sb.String()
 }
